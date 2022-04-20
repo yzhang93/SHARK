@@ -6,7 +6,7 @@
 TD="$(cd $(dirname $0) && pwd)"
 VENV_DIR="$TD/shark.venv"
 if [ -z "$PYTHON" ]; then
-  PYTHON="$(which python3)"
+  PYTHON="$(which python3.9)"
 fi
 
 echo "Setting up venv dir: $VENV_DIR"

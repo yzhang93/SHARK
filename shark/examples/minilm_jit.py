@@ -25,7 +25,7 @@ class MiniLMSequenceClassification(torch.nn.Module):
         return self.model.forward(tokens)[0]
 
 
-test_input = _prepare_sentence_tokens("this project is very interesting")
+test_input = _prepare_sentence_tokens("this project is very interesting, isn't it")
 
 shark_module = SharkInference(
     MiniLMSequenceClassification(), (test_input,), device="cpu", jit_trace=True

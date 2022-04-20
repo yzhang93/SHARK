@@ -73,6 +73,7 @@ class AOTModule:
         return fx_g
 
     def get_forward_graph(self, fx_g: fx.GraphModule, inps):
+        print("generating forward graph....")
         fx_g = self.change_fx_graph_return_to_tuple(fx_g)
         f = torch.jit.script(fx_g)
         f = torch.jit.freeze(f.eval())
@@ -83,6 +84,7 @@ class AOTModule:
         return f
 
     def get_backward_graph(self, fx_g: fx.GraphModule, inps):
+        print("generating backward graph....")
         fx_g = self.change_fx_graph_return_to_tuple(fx_g)
         f = torch.jit.script(fx_g)
         f = torch.jit.freeze(f.eval())

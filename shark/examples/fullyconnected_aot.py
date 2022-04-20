@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
-from shark_runner import SharkTrainer
+from shark.shark_runner import SharkTrainer
+from shark.functorch_utils import AOTModule
 
 
 class NeuralNet(nn.Module):

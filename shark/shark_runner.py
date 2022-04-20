@@ -14,6 +14,8 @@
 
 from shark.torch_mlir_utils import get_torch_mlir_module, export_module_to_mlir_file
 from shark.iree_utils import get_results, get_iree_compiled_module, export_iree_module_to_vmfb
+from shark.functorch_utils import AOTModule
+import torch
 import argparse
 import os
 # from functorch_utils import AOTModule
@@ -122,36 +124,46 @@ class SharkTrainer:
         self.backward_graph = aot_module.backward_graph
         print(self.backward_graph.graph)
         self.backward_inputs = aot_module.backward_inputs
+        self.params = self.model.parameters()
 
-        # self.shark_forward = SharkRunner(
-        # self.forward_graph,
-        # self.forward_inputs,
-        # dynamic,
-        # device,
-        # jit_trace,
-        # from_aot,
-        # )
-        self.shark_backward = SharkRunner(
-            self.backward_graph,
-            self.backward_inputs,
-            dynamic,
-            device,
-            jit_trace,
-            from_aot,
-        )
+    def train(self, input, optimizer=None):
+        if optimizer is None:
+            optimizer = torch.optim.SGD(self.params, .001)
 
-    def train(self, input):
         forward_inputs = []
-        backward_inputs = []
+        backward_inputs = [] #will these be labels?
         for input in self.forward_inputs:
             forward_inputs.append(input.detach().numpy())
         for input in self.backward_inputs:
             backward_inputs.append(input.detach().numpy())
-
-        # TODO: Pass the iter variable, and optimizer.
+#
+        self.shark_forward = SharkRunner(
+            self.forward_graph,
+            forward_inputs,
+            dynamic=False,
+            device="cpu",
+            tracing_required=False,
+            from_aot=True,
+            )
+        
+        self.shark_backward = SharkRunner(
+            self.backward_graph,
+            backward_inputs,
+            dynamic=False,
+            device="cpu",
+            tracing_required=False,
+            from_aot=True,
+        )
+#        # TODO: Pass the iter variable, and optimizer.
         iters = 1
+        index = 0
 
-        for _ in range(iters):
+        for it in range(iters):
             self.shark_forward.forward(forward_inputs)
-            # self.shark_backward.forward(backward_inputs)
+            gradients = self.shark_backward.forward(backward_inputs)
+            for p in self.params():
+                p.grad = gradients[i]
+                i+=1
+
+        optimizer.step()
         return
