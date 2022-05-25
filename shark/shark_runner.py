@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from shark.torch_mlir_utils import get_torch_mlir_module, export_module_to_mlir_file, run_on_refbackend
-from shark.iree_utils import get_results, get_iree_compiled_module, export_iree_module_to_vmfb
+from shark.iree_utils import get_results, get_iree_compiled_module, export_iree_module_to_vmfb, build_benchmark_args, run_benchmark
 import os
 from shark.parser import shark_args
 from shark.backward_makefx import MakeFxModule
@@ -154,3 +154,72 @@ class SharkTrainer:
             weights = self.shark_runner.forward(weights + inputs)
 
         return weights
+
+
+class SharkBenchmark:
+    """Base class for Shark Inference and Shark Runner."""
+
+    def __init__(
+        self,
+        model,
+        input: tuple,
+        dynamic: bool = False,
+        device: str = None,
+        jit_trace: bool = False,
+        from_aot: bool = False,
+        custom_inference_fn=None,
+    ):
+        self.torch_module = model
+        self.from_aot = from_aot
+        self.input = input
+        self.device = device if device is not None else shark_args.device
+        self.torch_mlir_module = get_torch_mlir_module(model, input, dynamic,
+                                                       jit_trace,
+                                                       from_aot)
+        vmfb_file = export_iree_module_to_vmfb(self.torch_mlir_module, self.device,
+                                    shark_args.repro_dir)
+        self.benchmark_cl = build_benchmark_args(vmfb_file, self.device, input, from_aot)
+        (
+            self.iree_compilation_module,
+            self.iree_config,
+        ) = get_iree_compiled_module(self.torch_mlir_module, self.device)
+
+    def forward(self, input):
+        return get_results(self.iree_compilation_module, input,
+                           self.iree_config)
+
+    def benchmark_torch(self, inputs):
+        inputs = self.input if self.from_aot else inputs
+        inputs = inputs[0]
+        for i in range(shark_args.num_warmup_iterations):
+            self.torch_module.forward(inputs)
+
+        begin = time.time()
+        for i in range(shark_args.num_iterations):
+            out = self.torch_module.forward(inputs)
+            if i == shark_args.num_iterations - 1:
+                end = time.time()
+                break
+        print(f"Torch benchmark:{shark_args.num_iterations/(end-begin)} iter/second, Total Iterations:{shark_args.num_iterations}")
+
+    def benchmark_c(self):
+        result = run_benchmark(self.benchmark_cl)
+        print(f"Shark-C benchmark:{result} iter/second")
+
+    def benchmark_python(self, inputs):
+        inputs = self.input if self.from_aot else inputs
+        input_list = [x.detach().numpy() for x in inputs]
+        for i in range(shark_args.num_warmup_iterations):
+            self.forward(input_list)
+
+        begin = time.time()
+        for i in range(shark_args.num_iterations):
+            out = self.forward(input_list)
+            if i == shark_args.num_iterations - 1:
+                end = time.time()
+        print(f"Shark-Python benchmark:{shark_args.num_iterations/(end-begin)} iter/second, Total Iterations:{shark_args.num_iterations}")
+
+    def benchmark_all(self, inputs):
+        self.benchmark_torch(inputs)
+        self.benchmark_python(inputs)
+        self.benchmark_c()

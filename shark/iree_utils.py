@@ -13,11 +13,13 @@
 # limitations under the License.
 
 import iree.runtime as ireert
+import iree.runtime.scripts.iree_benchmark_module as benchmark_module
 import iree.compiler as ireec
 import subprocess
 import numpy as np
 import os
 from shark.torch_mlir_utils import get_module_name_for_asm_dump
+import re
 
 IREE_DEVICE_MAP = {
     "cpu": "dylib",
@@ -27,6 +29,10 @@ IREE_DEVICE_MAP = {
     "metal": "vulkan"
 }
 
+UNIT_TO_SECOND_MAP = {
+    "ms": 0.001,
+    "s": 1
+}
 
 def check_device_drivers(device):
     """Checks necessary drivers present for gpu and vulkan devices"""
@@ -98,6 +104,7 @@ def export_iree_module_to_vmfb(module, device: str, directory: str):
     filename = os.path.join(directory, module_name + ".vmfb")
     with open(filename, 'wb') as f:
         f.write(flatbuffer_blob)
+    return filename
 
 
 def get_results(compiled_vm, input, config):
@@ -111,3 +118,51 @@ def get_results(compiled_vm, input, config):
         return result_tensors
     else:
         return np.copy(np.asarray(result, dtype=result.dtype))
+
+######### Benchmark Related Tools ###########
+def tensor_to_type_str(input_tensors : tuple):
+    # TODO: Support more than floats, and ints
+    list_of_type = []
+    for input_tensor in input_tensors:
+        type_string = "x".join([str(dim) for dim in input_tensor.shape])
+        dtype_string = str(input_tensor.dtype).replace("torch.","")
+        regex_split = re.compile("([a-zA-Z]+)([0-9]+)")
+        match = regex_split.match(dtype_string)
+        mlir_type_string = str(match.group(1)[0])+str(match.group(2))
+        type_string += f"x{mlir_type_string}"
+        list_of_type.append(type_string)
+    return list_of_type
+
+def build_benchmark_args(input_file : str, device : str, input_tensors : tuple, training=False):
+    path = benchmark_module.__path__[0]
+    benchmark_cl = [os.path.join(path, "..", "..",
+                        "iree-benchmark-module"), f"--module_file={input_file}"]
+    fn_name = "forward"
+    if training == True:
+        # TODO: Replace name of train with actual train fn name.
+        fn_name = "train"
+    benchmark_cl.append(f"--entry_function={fn_name}")
+    benchmark_cl.append(f"--driver={IREE_DEVICE_MAP[device]}")
+    mlir_input_types = tensor_to_type_str(input_tensors)
+    for mlir_input in mlir_input_types:
+        benchmark_cl.append(f"--function_input={mlir_input}")
+    time_extractor = "| awk \'END{{print $2 $3}}\'"
+    benchmark_cl.append(time_extractor)
+    return benchmark_cl
+
+def run_cmd(cmd):
+    try:
+        result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        result_str = result.stdout.decode()
+        return result_str
+    except Exception:
+        sys.exit("Exiting program due to error running:", cmd)
+
+def run_benchmark(benchmark_cl):
+    """ Outputs iteration per second"""
+    bench_result = run_cmd(' '.join(benchmark_cl))
+    regex_split = re.compile("([0-9]+[.]*[0-9]*)([a-zA-Z]+)")
+    match = regex_split.match(bench_result)
+    time = float(match.group(1))
+    unit = match.group(2)
+    return 1.0/(time*UNIT_TO_SECOND_MAP[unit])
