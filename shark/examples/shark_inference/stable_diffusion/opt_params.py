@@ -19,6 +19,8 @@ if not args.iree_vulkan_target_triple:
         args.use_tuned = False
 elif "rdna3" not in args.iree_vulkan_target_triple:
     args.use_tuned = False
+if args.precision != "fp16":
+    args.use_tuned = False
 if args.use_tuned:
     print("Using tuned models for rdna3 card")
 
